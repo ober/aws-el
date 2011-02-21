@@ -118,9 +118,9 @@
   "The current EC2 region")
 (make-local-variable 'ec2-region)
 
-(defvar ec2-refresh-method nil
+(defvar ec2-refresh-function nil
   "The function which should be used to refresh this EC2 mode.")
-(make-local-variable 'ec2-refresh-method)
+(make-local-variable 'ec2-refresh-function)
 
 (defconst ec2-font-lock-keywords
   `((,(regexp-opt ec2-keywords) . font-lock-keyword-face)
@@ -318,7 +318,7 @@ be hidden."
   (setq buffer-read-only t)
 
   (setq font-lock-defaults '(ec2-font-lock-keywords))
-  (setq ec2-refresh-function 'ec2-instance-list-refresh)
+  (fset 'ec2-refresh-function 'ec2-instance-list-refresh)
   (set (make-local-variable 'paragraph-start) "^RESERVATION")
 
   (run-mode-hooks 'ec2-instance-list-mode-hook)
@@ -346,8 +346,6 @@ be hidden."
   (ec2-unfilter)
   (let ((buffer-read-only nil))
     (delete-region (point-min) (point-max))
-    (insert "\n")
-    (goto-char (point-min))
     (ec2-call-process "ec2-describe-instances")))
 
 (defun ec2-instance-reboot ()
@@ -367,7 +365,6 @@ be hidden."
     (set-keymap-parent map ec2-common-map)
     (define-key map (kbd "n") 'ec2-next-volume)
     (define-key map (kbd "p") 'ec2-previous-volume)
-    (define-key map (kbd "g") 'ec2-volume-list-refresh)
     (define-key map (kbd "f") 'ec2-volume-list-filter-status)
     map)
   "Keymap used by `ec2-instance-list-mode'.")
@@ -382,9 +379,10 @@ be hidden."
 
   (setq font-lock-defaults '(ec2-font-lock-keywords))
   (set (make-local-variable 'paragraph-start) "^VOLUME")
+  (fset 'ec2-refresh-function 'ec2-volume-list-refresh)
 
   (run-mode-hooks 'ec2-volume-list-mode-hook)
-  (ec2-volume-list-refresh))
+  (ec2-refresh))
 
 (defun ec2-volume-list-refresh ()
   "Refresh the list of EC2 volumes here."
@@ -422,7 +420,6 @@ be hidden."
     (set-keymap-parent map ec2-common-map)
     (define-key map (kbd "n") 'ec2-next-snapshot)
     (define-key map (kbd "p") 'ec2-previous-snapshot)
-    (define-key map (kbd "g") 'ec2-snapshot-list-refresh)
     (define-key map (kbd "f") 'ec2-snapshot-list-filter-status)
     map)
   "Keymap used by `ec2-instance-list-mode'.")
@@ -437,9 +434,10 @@ be hidden."
 
   (setq font-lock-defaults '(ec2-font-lock-keywords))
   (set (make-local-variable 'paragraph-start) "^SNAPSHOT")
+  (fset 'ec2-refresh-function 'ec2-snapshot-list-refresh)
 
   (run-mode-hooks 'ec2-snapshot-list-mode-hook)
-  (ec2-snapshot-list-refresh))
+  (ec2-refresh))
 
 (defun ec2-snapshot-list-refresh ()
   "Refresh the list of EC2 snapshots here."
@@ -471,11 +469,10 @@ be hidden."
 
   (setq font-lock-defaults '(ec2-font-lock-keywords))
   (set (make-local-variable 'paragraph-start) "^GROUP")
-
-  (set (make-local-variable 'paragraph-start) "^GROUP")
+  (fset 'ec2-refresh-function 'ec2-group-list-refresh)
 
   (run-mode-hooks 'ec2-group-list-mode-hook)
-  (ec2-group-list-refresh))
+  (ec2-refresh))
 
 (defun ec2-group-list-refresh ()
   "Refresh the list of EC2 groups here."
@@ -518,7 +515,9 @@ This does't currently work."
   ;; (setq font-lock-defaults '(ec2-font-lock-keywords))
 
   (run-mode-hooks 'ec2-instance-console-mode-hook)
-  (ec2-instance-console-refresh))
+  (fset 'ec2-refresh-function 'ec2-instance-console-refresh)
+
+  (ec2-refresh))
 
 (defun ec2-instance-console-refresh ()
   "Refresh the instance's console."
