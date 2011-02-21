@@ -80,7 +80,8 @@
   "Available EC2 regions.")
 
 (defconst ec2-keywords
-  '("BLOCKDEVICE" "RESERVATION" "INSTANCE" "REGION" "SNAP")
+  '("BLOCKDEVICE" "RESERVATION" "INSTANCE" "REGION" "GROUP" "PERMISSION"
+    "VOLUME" "ATTACHMENT" "SNAPSHOT")
   "Keywords used in EC2")
 
 (defconst ec2-reservation-pattern
@@ -117,6 +118,10 @@
   "The current EC2 region")
 (make-local-variable 'ec2-region)
 
+(defvar ec2-refresh-method nil
+  "The function which should be used to refresh this EC2 mode.")
+(make-local-variable 'ec2-refresh-method)
+
 (defconst ec2-font-lock-keywords
   `((,(regexp-opt ec2-keywords) . font-lock-keyword-face)
     (,ec2-reservation-pattern . font-lock-variable-name-face)
@@ -130,36 +135,104 @@
 (defconst ec2-instance-list-font-lock-keywords
   ec2-font-lock-keywords)
 
+(defconst ec2-permission-user-source-fields
+  '(user group policy protocol low-port high-port _ type source-user _
+         source-group)
+  "Fields for when a group has a group as its source.")
+
+(defconst ec2-permission-cidr-source-fields
+  '(user group policy protocol low-port high-port _ type source-netmask)
+  "Fields for when a group has an IP as its source.")
+
+(defun ec2-parse-permission-line (bits)
+  (mapcar* 'cons
+           (cond ((string= "CIDR" (nth 7 bits))
+                  ec2-permission-cidr-source-fields)
+                 ((string= "USER" (nth 7 bits))
+                  ec2-permission-user-source-fields))
+           bits))
+
 (defconst ec2-line-parse-alist
   '(("RESERVATION" . (id owner groups))
     ("INSTANCE" . (id image-id public-dns-name internal-dns-name state key-name launch-index nil1 instance-type launch-time availability-zone kernel-id nil2 nil3 monitoring-state private-ip public-ip nil4 nil5 root-device-type nil6 nil7 nil8 nil9 virtualization-type))
-    ("BLOCKDEVICE" . (device volume-id attach-time nil1))))
+    ("BLOCKDEVICE" . (device volume-id attach-time nil1))
+    ("VOLUME" . (id size source-snapshot availability-zone status create-time))
+    ("ATTACHMENT" . (id instance device status attach-time))
+    ("GROUP" . (owner name description))
+    ("PERMISSION" . ec2-parse-permission-line))
+  "Alist of types of lines and the symbols which should be used to parse them.")
+
+(defconst ec2-terminate-commands-alist
+  '(("INSTANCE" . "ec2-terminate-instance")
+    ("BLOCKDEVICE" . "ec2-delete-volume")
+    ("GROUP" . "ec2-delete-group")
+    ("ATTACHMENT" . ec2-detach-volume))
+  "Alist of EC2 lines and their associated termination commands.")
+
+(defconst ec2-mode-entrypoints
+  '((ec2-volume-list-mode . ec2-describe-volumes)
+    (ec2-instance-list-mode . ec2-describe-instances)
+    (ec2-snapshot-list-mode . ec2-describe-snapshots)
+    (ec2-group-list-mode . ec2-describe-groups))
+  "Entry-point functions for the various AWS modes.")
 
 (defvar ec2-common-map
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map t)
-    (define-key map (kbd "q") 'ec2-delete-process)
+    (define-key map (kbd "g") 'ec2-refresh)
+    (define-key map (kbd "k") 'ec2-delete-process)
+    (define-key map (kbd "j") 'ec2-region-jump)
     (define-key map (kbd "s") 'ec2-ssh)
     (define-key map (kbd "RET") 'ec2-ssh)
     (define-key map (kbd "/") 'ec2-unfilter)
+    (define-key map (kbd "q") 'bury-buffer)
     map)
   "Common keymap for EC2 modes.")
 
-(defvar ec2-instance-list-mode-map
-  (let ((map (make-keymap)))
-    (set-keymap-parent map ec2-common-map)
-    (define-key map (kbd "n") 'ec2-next-instance)
-    (define-key map (kbd "p") 'ec2-previous-instance)
-    (define-key map (kbd "g") 'ec2-instance-list-refresh)
-    (define-key map (kbd "f") 'ec2-instance-list-filter-group)
-    map)
-  "Keymap used by `ec2-instance-list-mode'.")
+(defun ec2-refresh ()
+  (interactive)
+  "Refresh the current EC2 buffer."
+  (widen)
+  (ec2-unfilter)
+  (let ((buffer-read-only nil))
+    (delete-region (point-min) (point-max))
+    (goto-char (point-min))
+    (save-excursion
+      (funcall 'ec2-refresh-function))))
+
+(defun ec2-region-jump (region)
+  (interactive (ec2-read-region))
+  "Jump to another region."
+  (funcall (cdr (assoc major-mode ec2-mode-entrypoints)) region))
+
+(defvar ec2-instance-map
+  (let ((map (make-sparse-keymap)))
+    (suppress-keymap map t)
+    (define-key map (kbd "x") 'ec2-terminate))
+  "Commands for working with EC2 instances.")
+
+(defvar ec2-ebs-map
+  (let ((map (make-sparse-keymap)))
+    (suppress-keymap map t)
+    (define-key map (kbd "x") 'ec2-terminate)
+    (define-key map (kbd "a") 'ec2-ebs-attach-volume)
+    (define-key map (kbd "d") 'ec2-ebs-detach-volume)
+    (define-key map (kbd "s") 'ec2-ebs-snapshot-volume)
+    )
+  "Commands for working with EBS volumes.")
+
+(defun ec2-parse-line ()
+  (let* ((bits (split-string
+                (buffer-substring-no-properties
+                 (line-beginning-position) (line-end-position)) (kbd "^I")))
+         (parser (cdr (assoc (car bits) ec2-line-parse-alist))))
+    (cond ((functionp parser) (funcall parser (cdr bits)))
+          ((listp parser) (mapcar* 'cons parser (cdr bits))))))
 
 (defun ec2-common-options ()
   "Return options common to all EC2/AWS commands."
-  (list "-C" ec2-certificate-file "-K" ec2-private-key-file))
-
-;; (concat (ec2-common-options) '(("--region" "us-east-1")))
+  (list "-C" ec2-certificate-file "-K" ec2-private-key-file
+        "--region" ec2-region))
 
 (defun ec2-delete-process ()
   (interactive)
@@ -168,7 +241,7 @@
 (defun ec2-call-process (program &rest args)
   (let ((process (get-buffer-process (current-buffer))))
     (when (and process (eq 'run (process-get process 'status)))
-      (error "There is a process running. `q' to abort it."))
+      (error "There is a process running. `k' to abort it."))
 
     (when process
       (delete-process process))
@@ -181,7 +254,62 @@
       (when (string-match "-describe-" program)
         (set-process-query-on-exit-flag process nil)))))
 
-(define-derived-mode ec2-instance-list-mode fundamental-mode "EC2"
+(defun ec2-ssh (arg)
+  (interactive "p")
+  (when (not (save-excursion
+               (goto-char (line-beginning-position))
+               (looking-at "INSTANCE")))
+    (error "No instance here."))
+
+  (let ((line (ec2-parse-line)))
+    (ssh (cdr (assoc (if (> arg 1) 'internal-dns-name 'public-dns-name)
+                     line)))))
+
+(defun ec2-filter-list (predicate)
+  "Filter a list of EC2 items in a buffer.
+PREDICATE is a function which accepts a list of the parsed elements of
+the line, returning `t' if the item should be kept, `nil' if it should
+be hidden."
+  (save-excursion
+    (let ((last-pos (goto-char (point-min)))
+          (buffer-read-only nil)
+          (line))
+
+      (while (and (not (eobp)) (setq line (ec2-parse-line)))
+        (unless (prog1 (funcall predicate line)
+                  (forward-paragraph))
+          (add-text-properties last-pos (point) '(intangible t invisible t)))
+        (setq last-pos (point))))))
+
+(defun ec2-unfilter ()
+  "Show everything."
+  (interactive)
+  (let ((buffer-read-only nil))
+    (remove-text-properties (point-min) (point-max)
+                            '(intangible nil invisible nil))))
+
+(defun ec2-terminate ()
+  "Terminate the thing at point."
+  (interactive)
+  (let* ((line (ec2-parse-line))
+         (id (cdr (assoc 'id line)))
+         (type (car line))
+         (command (cdr (assoc type ec2-terminate-commands-alist))))
+    (ec2-call-process command)))
+
+
+;;;;; Instances ;;;;;
+
+(defvar ec2-instance-list-mode-map
+  (let ((map (make-keymap)))
+    (set-keymap-parent map ec2-common-map)
+    (define-key map (kbd "n") 'ec2-next-instance)
+    (define-key map (kbd "p") 'ec2-previous-instance)
+    (define-key map (kbd "f") 'ec2-instance-list-filter-group)
+    map)
+  "Keymap used by `ec2-instance-list-mode'.")
+
+(define-derived-mode ec2-instance-list-mode fundamental-mode "EC2 Instances"
   "Major mode for interacting with lists of EC2 instances.
 
 \\{ec2-instance-list-mode-map}"
@@ -190,25 +318,228 @@
   (setq buffer-read-only t)
 
   (setq font-lock-defaults '(ec2-font-lock-keywords))
+  (setq ec2-refresh-function 'ec2-instance-list-refresh)
   (set (make-local-variable 'paragraph-start) "^RESERVATION")
 
   (run-mode-hooks 'ec2-instance-list-mode-hook)
-  (ec2-instance-list-refresh))
+  (ec2-refresh))
+
+;;;###autoload
+(defun ec2-describe-instances (region)
+  (interactive (ec2-read-region))
+  (let ((region (or region ec2-default-region)))
+    (pop-to-buffer (get-buffer-create (format "*ec2-instances-%s*" region)))
+    (setq ec2-region region)
+    (ec2-instance-list-mode)))
+
+(defun ec2-instance-list-filter-group (group)
+  "Only show instances matching a group."
+  (interactive "sGroup: ")
+  (ec2-filter-list
+   (lambda (instance)
+     (string-match group (cdr (assoc 'groups instance))))))
 
 (defun ec2-instance-list-refresh ()
   "Refresh the list of EC2 instances here."
   (interactive)
   (widen)
+  (ec2-unfilter)
   (let ((buffer-read-only nil))
     (delete-region (point-min) (point-max))
-    (ec2-call-process "ec2-describe-instances" "--region" ec2-region)))
+    (insert "\n")
+    (goto-char (point-min))
+    (ec2-call-process "ec2-describe-instances")))
 
-(defun ec2-parse-line ()
-  (let* ((bits (split-string
-                (buffer-substring-no-properties
-                 (line-beginning-position) (line-end-position)) "   "))
-         (field-map (cdr (assoc (car bits) ec2-line-parse-alist))))
-    (mapcar* 'cons field-map (cdr bits))))
+(defun ec2-instance-reboot ()
+  "Issue a reboot command to an EC2 instance."
+  (interactive)
+  (ec2-call-process "ec2-reboot-instance" (cdr (assoc 'id (ec2-parse-line)))))
+
+(defun ec2-instance-show-current-console ()
+  (interactive)
+  (ec2-get-console ec2-region (cdr (assoc 'id (ec2-parse-line)))))
+
+
+;;;;; Volumes ;;;;;
+
+(defvar ec2-volume-list-mode-map
+  (let ((map (make-keymap)))
+    (set-keymap-parent map ec2-common-map)
+    (define-key map (kbd "n") 'ec2-next-volume)
+    (define-key map (kbd "p") 'ec2-previous-volume)
+    (define-key map (kbd "g") 'ec2-volume-list-refresh)
+    (define-key map (kbd "f") 'ec2-volume-list-filter-status)
+    map)
+  "Keymap used by `ec2-instance-list-mode'.")
+
+(define-derived-mode ec2-volume-list-mode fundamental-mode "EC2 Volumes"
+  "Major mode for interacting with lists of EC2 instances.
+
+\\{ec2-volume-list-mode-map}"
+  :group 'ec2
+  (buffer-disable-undo)
+  (setq buffer-read-only t)
+
+  (setq font-lock-defaults '(ec2-font-lock-keywords))
+  (set (make-local-variable 'paragraph-start) "^VOLUME")
+
+  (run-mode-hooks 'ec2-volume-list-mode-hook)
+  (ec2-volume-list-refresh))
+
+(defun ec2-volume-list-refresh ()
+  "Refresh the list of EC2 volumes here."
+  (interactive)
+  (widen)
+  (ec2-unfilter)
+  (let ((buffer-read-only nil))
+    (delete-region (point-min) (point-max))
+    (ec2-call-process "ec2-describe-volumes")))
+
+;;;###autoload
+(defun ec2-describe-volumes (region)
+  (interactive (ec2-read-region))
+  (let ((region (or region ec2-default-region)))
+    (pop-to-buffer (get-buffer-create (format "*ec2-volumes-%s*" region)))
+    (setq ec2-region region)
+    (ec2-volume-list-mode)))
+
+(defconst ec2-ebs-status-list
+  '("available" "in-use"))
+
+(defconst ec2-ebs-attachment-status-list
+  '("attached" "attaching"))
+
+(defun ec2-volume-available-p (line)
+  (string= (cdr (assoc 'status line)) "available"))
+
+(defun ec2-volume-in-use-p (line)
+  (string= (cdr (assoc 'status line)) "in-use"))
+
+;;;;; Snapshots ;;;;;
+
+(defvar ec2-snapshot-list-mode-map
+  (let ((map (make-keymap)))
+    (set-keymap-parent map ec2-common-map)
+    (define-key map (kbd "n") 'ec2-next-snapshot)
+    (define-key map (kbd "p") 'ec2-previous-snapshot)
+    (define-key map (kbd "g") 'ec2-snapshot-list-refresh)
+    (define-key map (kbd "f") 'ec2-snapshot-list-filter-status)
+    map)
+  "Keymap used by `ec2-instance-list-mode'.")
+
+(define-derived-mode ec2-snapshot-list-mode fundamental-mode "EC2 Snapshots"
+  "Major mode for interacting with lists of EC2 instances.
+
+\\{ec2-snapshot-list-mode-map}"
+  :group 'ec2
+  (buffer-disable-undo)
+  (setq buffer-read-only t)
+
+  (setq font-lock-defaults '(ec2-font-lock-keywords))
+  (set (make-local-variable 'paragraph-start) "^SNAPSHOT")
+
+  (run-mode-hooks 'ec2-snapshot-list-mode-hook)
+  (ec2-snapshot-list-refresh))
+
+(defun ec2-snapshot-list-refresh ()
+  "Refresh the list of EC2 snapshots here."
+  (interactive)
+  (widen)
+  (ec2-unfilter)
+  (let ((buffer-read-only nil))
+    (delete-region (point-min) (point-max))
+    (ec2-call-process "ec2-describe-snapshots")))
+
+;;;###autoload
+(defun ec2-describe-snapshots (region)
+  (interactive (ec2-read-region))
+  (let ((region (or region ec2-default-region)))
+    (pop-to-buffer (get-buffer-create (format "*ec2-snapshots-%s*" region)))
+    (setq ec2-region region)
+    (ec2-snapshot-list-mode)))
+
+
+;;;; Groups ;;;;;
+
+(define-derived-mode ec2-group-list-mode fundamental-mode "EC2 Groups"
+  "Major mode for interacting with lists of EC2 instances.
+
+\\{ec2-group-list-mode-map}"
+  :group 'ec2
+  (buffer-disable-undo)
+  (setq buffer-read-only t)
+
+  (setq font-lock-defaults '(ec2-font-lock-keywords))
+  (set (make-local-variable 'paragraph-start) "^GROUP")
+
+  (set (make-local-variable 'paragraph-start) "^GROUP")
+
+  (run-mode-hooks 'ec2-group-list-mode-hook)
+  (ec2-group-list-refresh))
+
+(defun ec2-group-list-refresh ()
+  "Refresh the list of EC2 groups here."
+  (interactive)
+  (widen)
+  (ec2-unfilter)
+  (let ((buffer-read-only nil))
+    (delete-region (point-min) (point-max))
+    (ec2-call-process "ec2-describe-group")))
+
+;;;###autoload
+(defun ec2-describe-groups (region)
+  (interactive (ec2-read-region))
+  (let ((region (or region ec2-default-region)))
+    (pop-to-buffer (get-buffer-create (format "*ec2-groups-%s*" region)))
+    (setq ec2-region region)
+    (ec2-group-list-mode)))
+
+(defun ec2-group-revoke ()
+  "Revoke this permission line.
+
+This does't currently work."
+  (save-excursion
+    (let ((line (ec2-parse-line))
+          (group (save-excursion (backward-paragraph) (ec2-parse-line))))
+
+      (ec2-call-process "ec2-revoke" (cdr (assoc 'name group))))))
+
+
+;;;;; Consoles ;;;;;
+
+(define-derived-mode ec2-instance-console-mode fundamental-mode "EC2 Console"
+  "Major mode for interacting with EC2 instance consoles
+
+\\{ec2-instance-console-mode-map}"
+  :group 'ec2
+  (buffer-disable-undo)
+  (setq buffer-read-only t)
+
+  ;; (setq font-lock-defaults '(ec2-font-lock-keywords))
+
+  (run-mode-hooks 'ec2-instance-console-mode-hook)
+  (ec2-instance-console-refresh))
+
+(defun ec2-instance-console-refresh ()
+  "Refresh the instance's console."
+  (interactive)
+  (widen)
+  (ec2-unfilter)
+  (let ((buffer-read-only nil))
+    (delete-region (point-min) (point-max))
+    (ec2-call-process "ec2-get-console-output" ec2-instance)))
+
+;;;###autoload
+(defun ec2-get-console (region instance)
+  (interactive (append (ec2-read-region) (read-string "Instance ID: ")))
+  (pop-to-buffer (get-buffer-create (format "*ec2-console-%s*" instance)))
+  (setq ec2-region region
+        ec2-instance instance)
+  (ec2-instance-console-mode))
+
+
+
+;;;;; Navigation ;;;;;
 
 (defun ec2-next-instance (&optional arg)
   "Move to the next instance in the instance list."
@@ -239,53 +570,5 @@
                                  default)))
     (setq ec2-region-history (cons region ec2-region-history))
     (list region)))
-
-;;;###autoload
-(defun ec2-describe-instances (region)
-  (interactive (ec2-read-region))
-  (let ((region (or region ec2-default-region)))
-    (pop-to-buffer (get-buffer-create (format "*ec2-instances-%s*" region)))
-    (setq ec2-region region)
-    (ec2-instance-list-mode)))
-
-(defun ec2-instance-list-filter-group (group)
-  "Only show instances matching a group."
-  (interactive "sGroup: ")
-  (save-excursion
-    (let ((buffer-read-only nil)
-          (case-fold-search t)
-          (last-pos)
-          (hide nil))
-      (goto-char (point-min))
-
-      (ignore-errors
-        (while (< (point) (point-max))
-          (when hide
-            (add-text-properties last-pos (point)
-                                 '(intangible t invisible t)))
-
-          (setq hide (not (string-match group
-                                        (cdr (assoc 'groups
-                                                    (ec2-parse-line))))))
-          (setq last-pos (point))
-          (forward-paragraph))))))
-
-(defun ec2-unfilter ()
-  "Show everything."
-  (interactive)
-  (let ((buffer-read-only nil))
-  (remove-text-properties (point-min) (point-max)
-                          '(intangible nil invisible nil))))
-
-(defun ec2-ssh (arg)
-  (interactive "p")
-  (when (not (save-excursion
-               (goto-char (line-beginning-position))
-               (looking-at "INSTANCE")))
-    (error "No instance here."))
-
-  (let ((line (ec2-parse-line)))
-    (ssh (cdr (assoc (if (> arg 1) 'internal-dns-name 'public-dns-name)
-                     line)))))
 
 (provide 'aws)
