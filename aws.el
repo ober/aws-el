@@ -575,3 +575,5 @@ This does't currently work."
     (list region)))
 
 (provide 'aws)
+
+;;; aws.el ends here
