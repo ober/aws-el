@@ -1,0 +1,40 @@
+* AWS-mode
+
+  AWS mode is a major mode for managing Amazon Web Services. It wraps
+  many of the [[http://docs.amazonwebservices.com/AWSEC2/latest/CommandLineReference/][command-line utilities]] provided by Amazon to manage
+  their services.
+
+* What’s supported?
+
+  AWS has many services and tools, not all of which are currently
+  supported.
+
+  - Listing EC2 instances, groups, EBS volumes and EBS snapshots.
+  - Logging into EC2 instances with SSH.
+  - Displaying an instance’s console output.
+  - Filtering lists based on various criteria:
+    - Instance security groups.
+    - Volume attachment status.
+    - Snapshot completion status.
+
+* What’s not supported?
+
+  Lots. Launching and terminating instances and volumes, creating and
+  deleting snapshots and volumes, managing groups. No support for ELB or
+  RDS. Probably lots more.
+
+* How do I use it?
+
+  Place =aws.el= in your =load-path=, then add this somewhere in your
+  .emacs:
+
+#+BEGIN_SRC emacs-lisp
+  (autoload 'ec2-describe-instances "aws")
+  (autoload 'ec2-describe-volumes "aws")
+  (autoload 'ec2-describe-snapshots "aws")
+  (autoload 'ec2-describe-groups "aws")
+  (autoload 'ec2-get-console "aws")
+#+END_SRC
+
+  At this point, you can hit =M-x ec2-describe-instances RET=, enter
+  an EC2 region, and get a list of instances in that region.
