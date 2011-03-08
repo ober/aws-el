@@ -198,7 +198,7 @@
   "Refresh the current EC2 buffer."
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (goto-char (point-min))
     (save-excursion
@@ -276,7 +276,7 @@ the line, returning `t' if the item should be kept, `nil' if it should
 be hidden."
   (save-excursion
     (let ((last-pos (goto-char (point-min)))
-          (buffer-read-only nil)
+          (inhibit-read-only t)
           (line))
 
       (while (and (not (eobp)) (setq line (ec2-parse-line)))
@@ -288,7 +288,7 @@ be hidden."
 (defun ec2-unfilter ()
   "Show everything."
   (interactive)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (remove-text-properties (point-min) (point-max)
                             '(intangible nil invisible nil))))
 
@@ -348,7 +348,7 @@ be hidden."
   (interactive)
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (ec2-call-process "ec2-describe-instances")))
 
@@ -393,7 +393,7 @@ be hidden."
   (interactive)
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (ec2-call-process "ec2-describe-volumes")))
 
@@ -448,7 +448,7 @@ be hidden."
   (interactive)
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (ec2-call-process "ec2-describe-snapshots")))
 
@@ -483,7 +483,7 @@ be hidden."
   (interactive)
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (ec2-call-process "ec2-describe-group")))
 
@@ -528,7 +528,7 @@ This does't currently work."
   (interactive)
   (widen)
   (ec2-unfilter)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (delete-region (point-min) (point-max))
     (ec2-call-process "ec2-get-console-output" ec2-instance)))
 
