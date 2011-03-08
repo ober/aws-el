@@ -26,6 +26,10 @@
 ;;; Commentary:
 ;;
 ;; (autoload 'ec2-describe-instances "aws")
+;; (autoload 'ec2-describe-volumes "aws")
+;; (autoload 'ec2-describe-snapshots "aws")
+;; (autoload 'ec2-describe-groups "aws")
+;; (autoload 'ec2-get-console "aws")
 ;; M-x ec2-describe-instances
 ;;
 ;;; Code:
