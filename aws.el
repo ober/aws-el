@@ -140,8 +140,8 @@
   ec2-font-lock-keywords)
 
 (defconst ec2-permission-user-source-fields
-  '(user group policy protocol low-port high-port _ type source-user _
-         source-group)
+  '(user group policy protocol low-port high-port _ type source-user
+         source-group _)
   "Fields for when a group has a group as its source.")
 
 (defconst ec2-permission-cidr-source-fields
@@ -162,7 +162,7 @@
     ("BLOCKDEVICE" . (device volume-id attach-time nil1))
     ("VOLUME" . (id size source-snapshot availability-zone status create-time))
     ("ATTACHMENT" . (id instance device status attach-time))
-    ("GROUP" . (owner name description))
+    ("GROUP" . (id owner name description))
     ("PERMISSION" . ec2-parse-permission-line))
   "Alist of types of lines and the symbols which should be used to parse them.")
 
@@ -462,6 +462,13 @@ be hidden."
 
 
 ;;;; Groups ;;;;;
+(defvar ec2-group-list-mode-map
+  (let ((map (make-keymap)))
+    (set-keymap-parent map ec2-common-map)
+    (define-key map (kbd "r") 'ec2-group-revoke)
+    (define-key map (kbd "g") 'ec2-group-list-refresh)
+    map)
+  "Keymap used by `ec2-group-list-mode'.")
 
 (define-derived-mode ec2-group-list-mode fundamental-mode "EC2 Groups"
   "Major mode for interacting with lists of EC2 instances.
@@ -496,14 +503,28 @@ be hidden."
     (ec2-group-list-mode)))
 
 (defun ec2-group-revoke ()
-  "Revoke this permission line.
-
-This does't currently work."
+  "Revoke this permission line."
+  (interactive)
   (save-excursion
-    (let ((line (ec2-parse-line))
-          (group (save-excursion (backward-paragraph) (ec2-parse-line))))
-
-      (ec2-call-process "ec2-revoke" (cdr (assoc 'name group))))))
+    (let* ((line (ec2-parse-line))
+           (group (save-excursion (backward-paragraph) (ec2-parse-line)))
+           (protocol (cdr (assoc 'protocol line)))
+           (range-arg (if (equal protocol "icmp") "-t" "-p"))
+           (range-sep (if (equal protocol "icmp") ":" "-"))
+           (source (let ((group (cdr (assoc 'source-group line)))
+                         (netmask (cdr (assoc 'source-netmask line))))
+                     (or (and group
+                              (list "-o" (cadr (split-string group))
+                                    "-u" (cdr (assoc 'source-user line))))
+                         (and netmask
+                              (list "-s" netmask))))))
+      (apply 'ec2-call-process
+             `("ec2-revoke"
+               "-P" ,protocol
+               ,range-arg ,(concat (cdr (assoc 'low-port line))
+                                   range-sep
+                                   (cdr (assoc 'high-port line)))
+               ,@source ,(cdr (assoc 'name group)))))))
 
 
 ;;;;; Consoles ;;;;;
