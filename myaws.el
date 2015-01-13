@@ -63,7 +63,7 @@
     (if (eq tagnum 0)
 	(insert (propertize (format "NO-GROUPS " tagnum) 'face '(:foreground "red")))
       (progn (insert (propertize "Groups:" 'face '(:foreground color)))
-	     (mapcar (lambda (x) (insert (propertize (format " %s/%s" (cdr (assoc 'GroupId x)) (cdr (assoc 'GroupName x))) 'face '(:foreground color)))) groups)))))
+	     (mapcar (lambda (x) (insert (propertize (format "%s/%s" (cdr (assoc 'GroupId x)) (cdr (assoc 'GroupName x))) 'face '(:foreground color)))) groups)))))
 
 (defun aws-print-mapping (vector color label)
   (if (eq (length vector) 0)
@@ -79,15 +79,15 @@
     (mapcar #'aws-print-instances (cdr (assoc 'Reservations (json-read-from-string (get-string-from-file instance-data)))))
     (sort-lines nil (point-min) (point-max))))
 
-
 (defun aws-print-instances (element)
+  (mapcar #'aws-print-instances-single (cdr (assoc 'Instances element))))
+
+(defun aws-print-instances-single (element)
   (let*
       (
-       (instances (cdr (assoc 'Instances element)))
-       (instance_first (elt instances 0))
+       (instance_first element)
        (groups (cdr (assoc 'Groups element)))
        (reservationid (cdr (assoc 'ReservationId element)))
-       ;;(second (elt (cdr (assoc 'Instances element)) 1))
        (tags (cdr (assoc 'Tags instance_first)))
        (virttype (cdr (assoc 'VirtualizationType instance_first)))
        (rootdev (cdr (assoc 'RootDeviceName instance_first)))
@@ -100,29 +100,44 @@
        (GroupName (cdr (assoc 'GroupName Placement)))
        (Tenancy (cdr (assoc 'Tenancy Placement)))
        (SourceDestCheck (cdr (assoc 'SourceDestCheck instance_first)))
-       (NetworkInterfaces (elt (cdr (assoc 'NetworkInterfaces instance_first))0))
-       (PrivateIpAddress (cdr (assoc 'PrivateIpAddress NetworkInterfaces)))
-       (OwnerId (cdr (assoc 'OwnerId NetworkInterfaces)))
-       (NetworkGroups (cdr (assoc 'Groups NetworkInterfaces)))
-       (publicdnsname (cdr (assoc 'PublicDnsName (cdr (assoc 'Association NetworkInterfaces)))))
-       (publicip (cdr (assoc 'PublicIp (cdr (assoc 'Association NetworkInterfaces)))))
-       (vpcid (cdr (assoc 'VpcId NetworkInterfaces)))
        (SubnetId (cdr (assoc 'SubnetId instance_first)))
        (InstanceType (cdr (assoc 'InstanceType instance_first)))
        (State (cdr (assoc 'Name (cdr (assoc 'State instance_first)))))
        (instanceid (cdr (assoc 'InstanceId instance_first)))
        (imageid (cdr (assoc 'ImageId instance_first)))
-       (launchtime (cdr (assoc 'LaunchTime instance_first))))
-
+       (launchtime (cdr (assoc 'LaunchTime instance_first)))
+       (NetworkInterfaces (ignore-errors (elt (cdr (assoc 'NetworkInterfaces instance_first)) 0)))
+       (PrivateIpAddress (cdr (assoc 'PrivateIpAddress NetworkInterfaces)))
+       (OwnerId (cdr (assoc 'OwnerId NetworkInterfaces)))
+       (NetworkGroups (cdr (assoc 'Groups NetworkInterfaces)))
+       (publicdnsname (cdr (assoc 'PublicDnsName (cdr (assoc 'Association NetworkInterfaces)))))
+       (publicip (cdr (assoc 'PublicIp (cdr (assoc 'Association NetworkInterfaces)))))
+       (vpcid (cdr (assoc 'VpcId NetworkInterfaces))))
+    ;; (setf network_interfaces (cdr (assoc 'NetworkInterfaces instance_first)))
+    ;; (if (> (length network_interfaces) 0)
+    ;; 	(progn
+    ;; 	  (setf NetworkInterfaces (elt network_interfaces 0))
+    ;; 	  (setf PrivateIpAddress (cdr (assoc 'PrivateIpAddress NetworkInterfaces)))
+    ;; 	  (setf OwnerId (cdr (assoc 'OwnerId NetworkInterfaces)))
+    ;; 	  (setf NetworkGroups (cdr (assoc 'Groups NetworkInterfaces)))
+    ;; 	  (setf publicdnsname (cdr (assoc 'PublicDnsName (cdr (assoc 'Association NetworkInterfaces)))))
+    ;; 	  (setf publicip (cdr (assoc 'PublicIp (cdr (assoc 'Association NetworkInterfaces)))))
+    ;; 	  (setf vpcid (cdr (assoc 'VpcId NetworkInterfaces))))
+    ;;   (progn
+    ;; 	(setf NetworkInterfaces " Nil")
+    ;; 	(setf PrivateIpAddress " Nil")
+    ;; 	(setf OwnerId " Nil")
+    ;; 	(setf NetworkGroups " Nil")
+    ;; 	(setf publicdnsname " Nil")
+    ;; 	(setf publicip " Nil")
+    ;; 	(setf vpcid " Nil")))
     (if (string= State "running")
         (progn
-          ;;(aws-create-link-for-instance "teal" publicip (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags))))
-          (insert (propertize (format "%s " (or (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags))) "NoName" ) ) 'face '(:foreground "teal")))
+          (aws-create-link-for-instance "teal" publicip (or (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags))) "NoName"))
           (insert (propertize (format " %s " State) 'face '(:foreground "darkgrey"))))
       (progn
-        ;;(aws-create-link-for-instance "red" publicip (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags))))
-         (insert (propertize (format "%s " (or (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags)))) "NoName") 'face '(:foreground "red")))
-        (insert (propertize (format "%s " State) 'face '(:foreground "red")))))
+	(insert (propertize (format "%s " (or (cdr (assoc 'Value (find-if (lambda (x) (equal (assoc-default 'Key x) "Name")) tags)))) "NoName") 'face '(:foreground "red")))
+	(insert (propertize (format "%s " State) 'face '(:foreground "red")))))
     (insert (propertize (format "%s " publicip) 'face '(:foreground "teal")))
     (insert (propertize (format "%s " instanceid) 'face '(:foreground "orange")))
     (insert (propertize (format "%s " SubnetId) 'face '(:foreground "pink")))
@@ -143,9 +158,9 @@
     (insert (propertize (format "%s " Tenancy) 'face '(:foreground "darkgrey")))
     (insert (propertize (format "%s " PrivateIpAddress) 'face '(:foreground "red")))
     (aws-print-groups NetworkGroups "blue")
-    ;;(insert (propertize (format "%s " NetworkGroups) 'face '(:foreground "yellow")))
+    (insert (propertize (format "%s " NetworkGroups) 'face '(:foreground "yellow")))
     (aws-print-tags tags "black")
-    (princ "\n")
+    (princ "\n")))
 
     (defun aws-print-image (element)
       (let*
@@ -174,7 +189,7 @@
               (insert (propertize (format " Public:%s " Public) 'face '(:foreground "green")))
               (insert (propertize (format " Type:%s " ImageType) 'face '(:foreground "green")))
               (insert (propertize (format " VirtbType:%s " VirtualizationType) 'face '(:foreground "green")))
-              (princ "\n"))))))
+              (princ "\n")))))
 
   ;;paravirtual xen nil available [((Ebs (VolumeType . standard) (VolumeSize . 80) (SnapshotId . snap-37ac0672) (DeleteOnTermination . t)) (DeviceName . /dev/sda1)) ((VirtualName . ephemeral0) (DeviceName . /dev/sdb))] x86_64 867690557112/prod-br-app-s1_deploy_rna_2013-03-07-22-31 ebs 867690557112 :json-false machine
 
@@ -200,7 +215,7 @@
       (insert (propertize (format "disable-rollback?:%s " disable-rollback) 'face '(:foreground "purple")))
       (insert (propertize (format "stackid: %s " stack-id) 'face '(:foreground "purple")))
       (insert (propertize (format "Creation Time: %s " creation-time) 'face '(:foreground "purple")))
-      (princ "\n"))))
+      (princ "\n")))
 
 (defun get-aws-metrics ()
   (interactive)
@@ -349,7 +364,7 @@
 
 (defun aws-create-link-for-instance (color ip name)
   "Insert clickable string inside a buffer"
-  (message "XXX: create_link color:%s ip:%s name:%s" color ip name)
+  ;;(message "XXX: create_link color:%s ip:%s name:%s" color ip name)
   (lexical-let ((color color)
 		(map (make-sparse-keymap)))
     (define-key map (kbd "<RET>")
@@ -648,9 +663,6 @@
 
 
 
-
-
-
 (setq mycolors (list
 		"red-2" "red-1" "red" "red+1" "red+2" "yellow-2" "yellow-1" "yellow" "yellow+1" "yellow+2" "green-2" "green-1" "green" "green+1" "green+2" "cyan-2" "cyan-1" "cyan" "cyan+1" "cyan+2" "blue-2" "blue-1" "blue" "blue+1" "blue+2" "magenta-2" "magenta-1" "magenta" "magenta+1" "magenta+2"))
 
@@ -675,7 +687,7 @@
 ;; describe-reserved-db-instances
 ;; describe-reserved-db-instances-offerings
 ;; download-db-log-file-portion
-;; help
+;; help>
 ;; list-tags-for-resource
 ;; modify-db-instance
 ;; modify-db-parameter-group
@@ -691,4 +703,3 @@
 ;; restore-db-instance-from-db-snapshot
 ;; restore-db-instance-to-point-in-time
 ;; revoke-db-security-group-ingress
-					;br e --filter="prod-br-(masta|dj|backgroundcache|worker)-s2" "sv status /etc/service/*" --force
